@@ -3,7 +3,22 @@ import * as admin from "firebase-admin";
 
 admin.initializeApp();
 
-const auth : admin.auth.Auth = admin.auth();
+const auth: admin.auth.Auth = admin.auth();
+const firestore: admin.firestore.Firestore = admin.firestore();
+
+type Channel = {
+  id: string,
+  lastMessage?: {
+    body: string,
+    authorId: string,
+    createdAt: any
+  },
+  members: {
+    [key: string]: boolean
+  },
+  createdAt: any,
+  updatedAt: any,
+}
 
 function getUsers(uids): Promise<admin.auth.UserRecord[]> {
 
@@ -21,21 +36,28 @@ function getUsers(uids): Promise<admin.auth.UserRecord[]> {
   });
 }
 
-export const getMembersInfo = functions.https.onRequest((request, response) => {
+function unique(arr: any[]) : any[] {
+  return arr.filter(function (value, index, self) {
+    return self.indexOf(value) === index;
+  });
+}
+
+export const getChannels = functions.https.onRequest((request, response) => {
   const idToken: string = request.body.token;
-  const memberUids: string[] = request.body.memberUids;
 
   auth.verifyIdToken(idToken).then((decodedToken) => {
-    getUsers(memberUids).then((users: admin.auth.UserRecord[]) => {
-      const responseJson = {
-        users: users
-      };
-      response.status(200);
-      response.send(JSON.stringify(responseJson));
-    }).catch(() => {
-      response.status(422);
-      response.send("Cannot get users information");
+    const currentUserUid: string = decodedToken.uid;
+    const query: admin.firestore.Query = firestore
+      .collection("channels")
+      .where(`members.${ currentUserUid }`, "==", true);
+
+    query.get().then((querySnapshot: admin.firestore.QuerySnapshot) => {
+
+      const channelData = querySnapshot.docs.map((item) => {
+
+      });
     });
+
   }).catch((error) => {
     console.log("Verify token error: ", error);
     response.status(401);
