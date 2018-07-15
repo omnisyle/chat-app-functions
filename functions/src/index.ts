@@ -20,14 +20,36 @@ type Channel = {
   updatedAt: any,
 }
 
-function getUsers(uids): Promise<admin.auth.UserRecord[]> {
+type Member = {
+  id: string,
+  displayName: string,
+  email: string,
+  profileUrl?: string,
+}
 
-  return new Promise<admin.auth.UserRecord[]>((resolve, reject) => {
+type GetChannelsResponse = {
+  channels: Channel[],
+  members: Member[],
+}
+
+type UserUid = string;
+
+function getUsers(uids: string[]): Promise<Member[]> {
+
+  return new Promise<Member[]>((resolve, reject) => {
     const requests = uids.map((uid) => auth.getUser(uid));
 
     Promise.all(requests)
-      .then(values => {
-        const results = values.map((value) => value as admin.auth.UserRecord);
+      .then((values: admin.auth.UserRecord[])=> {
+        const results = values.map((value: admin.auth.UserRecord) => {
+          return {
+            id: value.uid,
+            displayName: value.displayName,
+            email: value.email,
+            profileUrl: value.photoURL,
+          };
+        });
+
         resolve(results);
       }).catch(function (error) {
         console.log("Error listing users:", error);
@@ -42,25 +64,69 @@ function unique(arr: any[]) : any[] {
   });
 }
 
+function filterMemberIds(currentUserUid: string, channels: Channel[]) : UserUid[]{
+  const allMemberIds = channels.reduce((results: string[], channel: Channel) : string[] => {
+    const channelMemberIds = Object.keys(channel.members) || [];
+    results.concat(channelMemberIds);
+    return results;
+  }, []);
+
+  return unique(allMemberIds);
+}
+
+function transformSnapshotToChannel(snapshot: admin.firestore.DocumentSnapshot[]) : Channel[] {
+
+  return snapshot.map((item: admin.firestore.DocumentSnapshot) => {
+    const docData = item.data();
+    return {
+      id: item.id,
+      members: docData.members,
+      createdAt: docData.createdAt,
+      updatedAt: docData.updatedAt,
+    };
+  });
+}
+
+function getMembers([currentUserUid, channels]): Promise<[Channel[], Member[]]> {
+  const memberIds = filterMemberIds(currentUserUid, channels);
+  const getUsersRequest: Promise<Member[]> = getUsers(memberIds);
+  return Promise.all([channels, getUsersRequest]);
+}
+
+function queryChannelsByUserId(decodedToken: admin.auth.DecodedIdToken) : Promise<[UserUid, Channel[]]> {
+  const currentUserUid: UserUid = decodedToken.uid;
+  const query: admin.firestore.Query = firestore
+    .collection("channels")
+    .where(`members.${ currentUserUid }`, "==", true);
+
+  const queryRequest: Promise<admin.firestore.QuerySnapshot> = query.get();
+
+  const transformPromise: Promise<Channel[]> = queryRequest.then(
+    (querySnapshot: admin.firestore.QuerySnapshot) => {
+
+      const channelData: Channel[] = transformSnapshotToChannel(querySnapshot.docs);
+      return channelData;
+    });
+
+  return Promise.all([currentUserUid, transformPromise]);
+}
+
 export const getChannels = functions.https.onRequest((request, response) => {
   const idToken: string = request.body.token;
 
-  auth.verifyIdToken(idToken).then((decodedToken) => {
-    const currentUserUid: string = decodedToken.uid;
-    const query: admin.firestore.Query = firestore
-      .collection("channels")
-      .where(`members.${ currentUserUid }`, "==", true);
-
-    query.get().then((querySnapshot: admin.firestore.QuerySnapshot) => {
-
-      const channelData = querySnapshot.docs.map((item) => {
-
-      });
+  auth.verifyIdToken(idToken)
+    .then(queryChannelsByUserId)
+    .then(getMembers)
+    .then(([channels, members]) => {
+      const res : GetChannelsResponse = {
+        channels,
+        members
+      };
+      response.status(200);
+      response.send(JSON.stringify(res));
+    }).catch((error) => {
+      console.log(error);
+      response.status(422);
+      response.send("Cannot process request");
     });
-
-  }).catch((error) => {
-    console.log("Verify token error: ", error);
-    response.status(401);
-    response.send("Unauthorized");
-  });
 });
