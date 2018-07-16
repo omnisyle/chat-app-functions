@@ -1,10 +1,12 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import * as cors from 'cors';
 
 admin.initializeApp();
 
 const auth: admin.auth.Auth = admin.auth();
 const firestore: admin.firestore.Firestore = admin.firestore();
+const corsHandler = cors({ origin: true });
 
 type Channel = {
   id: string,
@@ -64,7 +66,7 @@ function unique(arr: any[]) : any[] {
   });
 }
 
-function filterMemberIds(currentUserUid: string, channels: Channel[]) : UserUid[]{
+function filterMemberIds(channels: Channel[]) : UserUid[]{
   const allMemberIds = channels.reduce((results: string[], channel: Channel) : string[] => {
     const channelMemberIds = Object.keys(channel.members) || [];
     results.concat(channelMemberIds);
@@ -87,13 +89,13 @@ function transformSnapshotToChannel(snapshot: admin.firestore.DocumentSnapshot[]
   });
 }
 
-function getMembers([currentUserUid, channels]): Promise<[Channel[], Member[]]> {
-  const memberIds = filterMemberIds(currentUserUid, channels);
+function getMembers(channels: Channel[]): Promise<[Channel[], Member[]]> {
+  const memberIds = filterMemberIds(channels);
   const getUsersRequest: Promise<Member[]> = getUsers(memberIds);
   return Promise.all([channels, getUsersRequest]);
 }
 
-function queryChannelsByUserId(decodedToken: admin.auth.DecodedIdToken) : Promise<[UserUid, Channel[]]> {
+function queryChannelsByUserId(decodedToken: admin.auth.DecodedIdToken) : Promise<Channel[]> {
   const currentUserUid: UserUid = decodedToken.uid;
   const query: admin.firestore.Query = firestore
     .collection("channels")
@@ -108,25 +110,30 @@ function queryChannelsByUserId(decodedToken: admin.auth.DecodedIdToken) : Promis
       return channelData;
     });
 
-  return Promise.all([currentUserUid, transformPromise]);
+  return transformPromise;
 }
 
 export const getChannels = functions.https.onRequest((request, response) => {
-  const idToken: string = request.body.token;
+  corsHandler(request, response, () => {
 
-  auth.verifyIdToken(idToken)
-    .then(queryChannelsByUserId)
-    .then(getMembers)
-    .then(([channels, members]) => {
-      const res : GetChannelsResponse = {
-        channels,
-        members
-      };
-      response.status(200);
-      response.send(JSON.stringify(res));
-    }).catch((error) => {
-      console.log(error);
-      response.status(422);
-      response.send("Cannot process request");
-    });
+    const idToken: string = request.headers["Authorization"] as string;
+
+    console.log(idToken);
+
+    auth.verifyIdToken(idToken)
+      .then(queryChannelsByUserId)
+      .then(getMembers)
+      .then(([channels, members]) => {
+        const res : GetChannelsResponse = {
+          channels,
+          members
+        };
+        response.status(200);
+        response.send(JSON.stringify(res));
+      }).catch((error) => {
+        console.log(error);
+        response.status(422);
+        response.send("Cannot process request");
+      });
+  });
 });
