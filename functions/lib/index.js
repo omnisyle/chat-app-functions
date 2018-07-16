@@ -8,23 +8,15 @@ const auth = admin.auth();
 const firestore = admin.firestore();
 const corsHandler = cors({ origin: true });
 function getUsers(uids) {
-    return new Promise((resolve, reject) => {
-        const requests = uids.map((uid) => auth.getUser(uid));
-        Promise.all(requests)
-            .then((values) => {
-            const results = values.map((value) => {
-                return {
-                    id: value.uid,
-                    displayName: value.displayName,
-                    email: value.email,
-                    profileUrl: value.photoURL,
-                };
-            });
-            resolve(results);
-        }).catch(function (error) {
-            console.log("Error listing users:", error);
-            reject(error);
-        });
+    const requests = uids.map((uid) => auth.getUser(uid));
+    return Promise.all(requests).then((values) => {
+        const results = values.map((value) => ({
+            id: value.uid,
+            displayName: value.displayName || "",
+            email: value.email,
+            profileUrl: value.photoURL || "",
+        }));
+        return results;
     });
 }
 function unique(arr) {
@@ -35,8 +27,7 @@ function unique(arr) {
 function filterMemberIds(channels) {
     const allMemberIds = channels.reduce((results, channel) => {
         const channelMemberIds = Object.keys(channel.members) || [];
-        results.concat(channelMemberIds);
-        return results;
+        return results.concat(channelMemberIds);
     }, []);
     return unique(allMemberIds);
 }
@@ -69,9 +60,8 @@ function queryChannelsByUserId(decodedToken) {
     return transformPromise;
 }
 exports.getChannels = functions.https.onRequest((request, response) => {
-    corsHandler(request, response, () => {
-        const idToken = request.headers["Authorization"];
-        console.log(idToken);
+    return corsHandler(request, response, () => {
+        const idToken = request.headers.authorization;
         auth.verifyIdToken(idToken)
             .then(queryChannelsByUserId)
             .then(getMembers)

@@ -38,25 +38,17 @@ type UserUid = string;
 
 function getUsers(uids: string[]): Promise<Member[]> {
 
-  return new Promise<Member[]>((resolve, reject) => {
-    const requests = uids.map((uid) => auth.getUser(uid));
+  const requests = uids.map((uid) => auth.getUser(uid));
 
-    Promise.all(requests)
-      .then((values: admin.auth.UserRecord[])=> {
-        const results = values.map((value: admin.auth.UserRecord) => {
-          return {
-            id: value.uid,
-            displayName: value.displayName,
-            email: value.email,
-            profileUrl: value.photoURL,
-          };
-        });
+  return Promise.all(requests).then((values: admin.auth.UserRecord[])=> {
+    const results = values.map((value: admin.auth.UserRecord) => ({
+      id: value.uid,
+      displayName: value.displayName || "",
+      email: value.email,
+      profileUrl: value.photoURL || "",
+    }));
 
-        resolve(results);
-      }).catch(function (error) {
-        console.log("Error listing users:", error);
-        reject(error);
-      });
+    return results;
   });
 }
 
@@ -69,8 +61,7 @@ function unique(arr: any[]) : any[] {
 function filterMemberIds(channels: Channel[]) : UserUid[]{
   const allMemberIds = channels.reduce((results: string[], channel: Channel) : string[] => {
     const channelMemberIds = Object.keys(channel.members) || [];
-    results.concat(channelMemberIds);
-    return results;
+    return results.concat(channelMemberIds);
   }, []);
 
   return unique(allMemberIds);
@@ -114,11 +105,9 @@ function queryChannelsByUserId(decodedToken: admin.auth.DecodedIdToken) : Promis
 }
 
 export const getChannels = functions.https.onRequest((request, response) => {
-  corsHandler(request, response, () => {
+  return corsHandler(request, response, () => {
 
-    const idToken: string = request.headers["Authorization"] as string;
-
-    console.log(idToken);
+    const idToken: string = request.headers.authorization;
 
     auth.verifyIdToken(idToken)
       .then(queryChannelsByUserId)
